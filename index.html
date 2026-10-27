@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
+<title>2048 Move Oracle</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: two-column workbench — the board you edit on the left, the verdict and controls on the right; stacks on phones. */
+:root {
+  --bg: #EDF0F4;
+  --surface: #FFFFFF;
+  --ink: #1A2130;
+  --muted: #5E6A7B;
+  --line: #D3DAE3;
+  --board: #2A3242;
+  --cell: #39445A;
+  --accent: #E8962B;
+  --accent-ink: #1A2130;
+  --bar: #B9C4D2;
+  --ok: #2E9C8F;
+  --t1: #E8EEF5; --t2: #CFE3EC; --t3: #A7D8D9; --t4: #78C6BE; --t5: #4FB3A6;
+  --t6: #2E9C8F; --t7: #F6D27A; --t8: #F3BC4E; --t9: #EFA234; --t10: #E9822B;
+  --t11: #DD5F2C; --t12: #C8433A; --t13: #A7345C; --t14: #7E2E78; --t15: #4E2A84;
+  --tile-dark: #1A2130; --tile-light: #FFFFFF;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F131A; --surface: #171D27; --ink: #E5E9EF; --muted: #8C97A8; --line: #263040;
+    --board: #1E2532; --cell: #2B3445; --accent: #F2A94A; --accent-ink: #12161D; --bar: #3A4558;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F131A; --surface: #171D27; --ink: #E5E9EF; --muted: #8C97A8; --line: #263040;
+  --board: #1E2532; --cell: #2B3445; --accent: #F2A94A; --accent-ink: #12161D; --bar: #3A4558;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(28px, 5vw, 40px); letter-spacing: -0.02em; margin: 0; line-height: 1; }
+h1 span { color: var(--accent); }
+.tag { color: var(--muted); margin: 0; max-width: 46ch; }
+.main { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 820px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* segmented controls */
+.seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+.seg button { font: 500 13px/1 var(--f-body); color: var(--muted); background: none; border: 0; padding: 8px 12px; border-radius: 7px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.label { font: 500 11px/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* board */
+.boardwrap { position: relative; container-type: inline-size; width: 100%; max-width: 520px; }
+.board { background: var(--board); border-radius: 14px; padding: 2.4cqw; display: grid; gap: 2.4cqw; aspect-ratio: 1; touch-action: none; user-select: none; -webkit-user-select: none; }
+.cell { border: 0; border-radius: 8px; background: var(--cell); display: grid; place-items: center; font-family: var(--f-display); font-weight: 800; letter-spacing: -0.03em; cursor: crosshair; padding: 0; min-width: 0; color: var(--tile-dark); transition: background-color 90ms; }
+.cell:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.cell.pop { animation: pop 160ms ease-out; }
+@keyframes pop { 0% { transform: scale(0.82); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .cell.pop { animation: none; } .cell { transition: none; } }
+.hint { position: absolute; left: 50%; bottom: -14px; transform: translate(-50%, 100%); background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 13px; padding: 6px 12px; border-radius: 8px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+/* palette */
+.palette { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; max-width: 520px; }
+.chip { border: 2px solid transparent; border-radius: 8px; padding: 7px 0; font: 700 12px/1 var(--f-display); cursor: pointer; min-width: 0; font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--bg) inset; }
+.chip.erase { background: var(--surface); color: var(--muted); border-color: var(--line); }
+.chip.erase[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
+.small { font-size: 13px; color: var(--muted); margin: 0; }
+kbd { font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); }
+
+/* verdict */
+.verdict { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.vhead { display: flex; align-items: center; gap: 16px; }
+.arrow { width: 72px; height: 72px; flex: none; border-radius: 16px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; transition: transform 160ms ease; }
+.arrow svg { width: 40px; height: 40px; }
+.arrow.none { background: var(--line); color: var(--muted); }
+.vtext { min-width: 0; }
+.vtext .big { font: 800 34px/1 var(--f-display); letter-spacing: -0.02em; text-transform: capitalize; }
+.vtext .sub { font: 400 12px/1.4 var(--f-mono); color: var(--muted); margin-top: 6px; }
+.moves { display: flex; flex-direction: column; gap: 8px; }
+.mv { display: grid; grid-template-columns: 56px minmax(0, 1fr) 78px; gap: 10px; align-items: center; font-size: 13px; }
+.mv .name { font-weight: 600; text-transform: capitalize; }
+.mv .track { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; }
+.mv .fill { height: 100%; background: var(--bar); border-radius: 5px; width: 0; transition: width 200ms; }
+.mv.best .fill { background: var(--accent); }
+.mv .val { font: 500 12px/1 var(--f-mono); text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mv.best .val { color: var(--ink); }
+.mv.illegal .name { color: var(--muted); text-decoration: line-through; }
+
+/* buttons */
+.btn { font: 600 14px/1 var(--f-body); padding: 11px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.stats { display: flex; gap: 22px; flex-wrap: wrap; }
+.stat .n { font: 700 22px/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.panel h2 { font: 700 15px/1.2 var(--f-display); margin: 0; }
+textarea { width: 100%; min-height: 70px; resize: vertical; font: 13px/1.5 var(--f-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.err { color: #C8433A; font-size: 13px; margin: 0; }
+details summary { cursor: pointer; font-weight: 600; }
+details p { color: var(--muted); font-size: 13.5px; max-width: 62ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>2048 Move <span>Oracle</span></h1>
+    <p class="tag">Copy your game onto the board. The solver looks several moves ahead through every possible tile spawn and picks the move with the best expected outcome.</p>
+  </header>
+
+  <div class="main">
+    <section class="col" aria-label="Board">
+      <div class="row">
+        <div class="seg" role="group" aria-label="Board size">
+          <button id="size4" type="button" data-size="4">4 × 4</button>
+          <button id="size5" type="button" data-size="5">5 × 5</button>
+        </div>
+        <span class="small" id="boardnote"></span>
+      </div>
+      <div class="boardwrap">
+        <div class="board" id="board"></div>
+        <div class="hint" id="hint" hidden>Tap where the new tile appeared</div>
+      </div>
+      <div style="height:4px"></div>
+      <div class="label">Paint tile</div>
+      <div class="palette" id="palette"></div>
+      <p class="small">Pick a tile, then tap or drag across cells. Right-click clears a cell. <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> make a move, <kbd>Enter</kbd> plays the best one, <kbd>Z</kbd> undoes.</p>
+    </section>
+
+    <section class="col" aria-label="Analysis">
+      <div class="verdict" aria-live="polite">
+        <div class="vhead">
+          <div class="arrow none" id="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div>
+          <div class="vtext">
+            <div class="label">Best move</div>
+            <div class="big" id="bestname">…</div>
+            <div class="sub" id="bestsub">Thinking</div>
+          </div>
+        </div>
+        <div class="moves" id="moves"></div>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="playBest" type="button">Play best move</button>
+        <button class="btn" id="undo" type="button">Undo</button>
+        <button class="btn" id="autoplay" type="button">Autoplay</button>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <div class="label">After each move</div>
+        </div>
+        <div class="seg" role="group" aria-label="New tile after a move">
+          <button id="spawnManual" type="button" data-spawn="manual">I place the new tile</button>
+          <button id="spawnRandom" type="button" data-spawn="random">Add a random tile</button>
+        </div>
+        <div class="label">Thinking time</div>
+        <div class="seg" role="group" aria-label="Thinking time">
+          <button id="thinkFast" type="button" data-think="150">Fast · 0.15 s</button>
+          <button id="thinkMid" type="button" data-think="600">Balanced · 0.6 s</button>
+          <button id="thinkDeep" type="button" data-think="2000">Deep · 2 s</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="label">Score</div><div class="n" id="score">0</div></div>
+          <div class="stat"><div class="label">Moves</div><div class="n" id="moveCount">0</div></div>
+          <div class="stat"><div class="label">Largest tile</div><div class="n" id="maxTile">–</div></div>
+        </div>
+        <div class="row">
+          <button class="btn" id="newGame" type="button">New game</button>
+          <button class="btn" id="clear" type="button">Clear board</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Paste a board</h2>
+        <textarea id="pasteBox" spellcheck="false" placeholder="0 0 2 2&#10;0 4 8 16&#10;2 2 32 64&#10;4 8 128 256"></textarea>
+        <div class="row">
+          <button class="btn" id="loadPaste" type="button">Load board</button>
+          <button class="btn" id="copyBoard" type="button">Copy current board</button>
+        </div>
+        <p class="small">16 numbers for 4×4 or 25 for 5×5, row by row. Use 0 or . for empty cells.</p>
+        <p class="err" id="pasteErr" hidden></p>
+      </div>
+
+      <details class="panel">
+        <summary>How the solver decides</summary>
+        <p>It runs expectimax. For each of your four moves it imagines every cell where the next tile could appear, as a 2 (90%) or a 4 (10%), then your best reply, and so on, a few moves deep. Lines that are very unlikely are cut short. Each position at the end is scored for empty cells, tiles lined up in order, and neighbours ready to merge. The bars show each move's expected score relative to the best one.</p>
+        <p>The search deepens until the thinking time runs out, so longer thinking reads further ahead. The same engine as a native C program reached 16384 on 4×4 in testing.</p>
+      </details>
+    </section>
+  </div>
+</div>
+
+<script id="engine-src" type="text/plain">
+"use strict";
+var N = 4, RL, RR, HE, MP;
+var TABLES = {};
+function revRow(row) { var r = 0; for (var i = 0; i < N; i++) r |= ((row >>> (4 * i)) & 15) << (4 * (N - 1 - i)); return r; }
+function setSize(n) {
+  N = n;
+  if (!TABLES[n]) {
+    var count = 1 << (4 * n);
+    var rl = new Uint32Array(count), rr = new Uint32Array(count), he = new Float32Array(count), mp = new Uint32Array(count);
+    var p35 = [], p4 = [];
+    for (var k = 0; k < 16; k++) { p35[k] = Math.pow(k, 3.5); p4[k] = Math.pow(k, 4); }
+    var line = new Int32Array(n), out = new Int32Array(n);
+    for (var row = 0; row < count; row++) {
+      for (var i = 0; i < n; i++) line[i] = (row >>> (4 * i)) & 15;
+      var sum = 0, empty = 0, merges = 0, prev = 0, counter = 0;
+      for (i = 0; i < n; i++) {
+        var rank = line[i];
+        sum += p35[rank];
+        if (rank === 0) empty++;
+        else { if (prev === rank) counter++; else if (counter > 0) { merges += 1 + counter; counter = 0; } prev = rank; }
+      }
+      if (counter > 0) merges += 1 + counter;
+      var ml = 0, mr = 0;
+      for (i = 1; i < n; i++) {
+        if (line[i - 1] > line[i]) ml += p4[line[i - 1]] - p4[line[i]]; else mr += p4[line[i]] - p4[line[i - 1]];
+      }
+      he[row] = 200000 + 270 * empty + 700 * merges - 47 * Math.min(ml, mr) - 11 * sum;
+      out.fill(0);
+      var kk = 0, last = 0, pts = 0;
+      for (i = 0; i < n; i++) {
+        var v = line[i];
+        if (!v) continue;
+        if (last && v === last && v < 15) { out[kk - 1] = v + 1; pts += 1 << (v + 1); last = 0; }
+        else { out[kk++] = v; last = v; }
+      }
+      var res = 0;
+      for (i = 0; i < n; i++) res |= out[i] << (4 * i);
+      rl[row] = res; mp[row] = pts;
+    }
+    for (row = 0; row < count; row++) rr[row] = revRow(rl[revRow(row)]);
+    TABLES[n] = { rl: rl, rr: rr, he: he, mp: mp };
+  }
+  var t = TABLES[n]; RL = t.rl; RR = t.rr; HE = t.he; MP = t.mp;
+}
+function transpose(b) {
+  var t = new Array(N), r, c;
+  for (c = 0; c < N; c++) t[c] = 0;
+  for (r = 0; r < N; r++) { var row = b[r]; for (c = 0; c < N; c++) t[c] |= ((row >>> (4 * c)) & 15) << (4 * r); }
+  return t;
+}
+function rowsVia(b, tab) { var r = new Array(N); for (var i = 0; i < N; i++) r[i] = tab[b[i]]; return r; }
+// 0 up, 1 down, 2 left, 3 right
+function execMove(d, b) {
+  if (d === 2) return rowsVia(b, RL);
+  if (d === 3) return rowsVia(b, RR);
+  if (d === 0) return transpose(rowsVia(transpose(b), RL));
+  return transpose(rowsVia(transpose(b), RR));
+}
+function same(a, b) { for (var i = 0; i < N; i++) if (a[i] !== b[i]) return false; return true; }
+function heurBoard(b) { var t = transpose(b), s = 0; for (var i = 0; i < N; i++) s += HE[b[i]] + HE[t[i]]; return s; }
+
+var TT_BITS = 18, TT_SIZE = 1 << TT_BITS, TT_MASK = TT_SIZE - 1;
+var ttKeys = new Int32Array(TT_SIZE * 5), ttScore = new Float64Array(TT_SIZE), ttDepth = new Uint8Array(TT_SIZE), ttGen = new Uint32Array(TT_SIZE);
+var gen = 0, curdepth = 0, depthLimit = 0, evals = 0, deadline = Infinity;
+var ABORT = { abort: true };
+function hashB(b) { var h = 0x2545F491 | 0; for (var i = 0; i < N; i++) { h = Math.imul(h ^ b[i], 0x85EBCA6B); h ^= h >>> 13; } h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16; return h & TT_MASK; }
+
+function chanceNode(b, cprob) {
+  if (cprob < 0.0001 || curdepth >= depthLimit) {
+    if ((++evals & 2047) === 0 && Date.now() > deadline) throw ABORT;
+    return heurBoard(b);
+  }
+  var h = hashB(b), base = h * 5, i, r, c;
+  if (ttGen[h] === gen && ttDepth[h] <= curdepth) {
+    var hit = true;
+    for (i = 0; i < N; i++) if (ttKeys[base + i] !== b[i]) { hit = false; break; }
+    if (hit) return ttScore[h];
+  }
+  var empty = 0;
+  for (r = 0; r < N; r++) for (c = 0; c < N; c++) if (((b[r] >>> (4 * c)) & 15) === 0) empty++;
+  cprob /= empty;
+  var res = 0, nb = b.slice();
+  for (r = 0; r < N; r++) {
+    var row = b[r];
+    for (c = 0; c < N; c++) {
+      if (((row >>> (4 * c)) & 15) !== 0) continue;
+      nb[r] = row | (1 << (4 * c)); res += maxNode(nb, cprob * 0.9) * 0.9;
+      nb[r] = row | (2 << (4 * c)); res += maxNode(nb, cprob * 0.1) * 0.1;
+      nb[r] = row;
+    }
+  }
+  res /= empty;
+  ttGen[h] = gen; ttDepth[h] = curdepth; ttScore[h] = res;
+  for (i = 0; i < N; i++) ttKeys[base + i] = b[i];
+  return res;
+}
+function maxNode(b, cprob) {
+  var best = 0;
+  curdepth++;
+  for (var d = 0; d < 4; d++) {
+    var nb = execMove(d, b);
+    if (!same(nb, b)) { var v = chanceNode(nb, cprob); if (v > best) best = v; }
+  }
+  curdepth--;
+  return best;
+}
+function cellsToRows(cells) {
+  var b = [];
+  for (var r = 0; r < N; r++) { var row = 0; for (var c = 0; c < N; c++) row |= cells[r * N + c] << (4 * c); b.push(row); }
+  return b;
+}
+function analyze(cells, n, budgetMs, fixedDepth) {
+  setSize(n);
+  var b = cellsToRows(cells);
+  var seen = 0;
+  for (var i = 0; i < cells.length; i++) seen |= 1 << cells[i];
+  var distinct = 0; seen >>= 1; while (seen) { seen &= seen - 1; distinct++; }
+  var maxD = fixedDepth || Math.min(Math.max(distinct - 2, 3), n === 4 ? 8 : 6);
+  var start = Date.now(), result = null, totalEvals = 0;
+  var valid = [], nexts = [];
+  for (var d = 0; d < 4; d++) { nexts[d] = execMove(d, b); valid[d] = !same(nexts[d], b); }
+  if (!valid.some(Boolean)) return { best: -1, valid: valid, scores: [0, 0, 0, 0], depth: 0, ms: 0, evals: 0 };
+  for (var depth = fixedDepth || 1; depth <= maxD; depth++) {
+    depthLimit = depth; gen++; evals = 0; curdepth = 0;
+    deadline = (fixedDepth || depth === 1) ? Infinity : start + budgetMs;
+    var scores = [0, 0, 0, 0];
+    try {
+      for (d = 0; d < 4; d++) if (valid[d]) scores[d] = chanceNode(nexts[d], 1) + 1e-6;
+    } catch (e) { if (e === ABORT) break; throw e; }
+    totalEvals += evals;
+    var best = -1;
+    for (d = 0; d < 4; d++) if (valid[d] && (best < 0 || scores[d] > scores[best])) best = d;
+    result = { best: best, valid: valid, scores: scores, depth: depth, evals: totalEvals };
+    if (Date.now() - start > budgetMs * 0.3) break;
+  }
+  result.ms = Date.now() - start;
+  return result;
+}
+if (typeof self !== "undefined" && typeof window === "undefined" && typeof module === "undefined") {
+  self.onmessage = function (e) {
+    var m = e.data;
+    if (!TABLES[m.n]) self.postMessage({ status: "tables", n: m.n });
+    var r = analyze(m.cells, m.n, m.budget, m.fixedDepth || 0);
+    r.key = m.key;
+    self.postMessage(r);
+  };
+}
+if (typeof module !== "undefined") module.exports = { analyze: analyze, setSize: setSize, execMove: execMove, cellsToRows: cellsToRows };
+</script>
+
+<script>
+(() => {
+  const DIRS = ["up", "down", "left", "right"];
+  const ARROW_ROT = [0, 180, -90, 90];
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- state ----------
+  const SAMPLE4 = [0,0,1,1, 0,2,3,4, 1,1,5,6, 2,3,7,8]; // example mid-game position
+  let st = { n: 4, cells: SAMPLE4.slice(), brush: 1, spawn: "manual", think: 600, score: 0, moves: 0 };
+  try {
+    const saved = JSON.parse(localStorage.getItem("oracle2048") || "null");
+    if (saved && (saved.n === 4 || saved.n === 5) && Array.isArray(saved.cells) && saved.cells.length === saved.n * saved.n) Object.assign(st, saved);
+  } catch (e) {}
+  let history = [];
+  let awaitingSpawn = false;
+  let lastResult = null;
+  let autoplay = false;
+
+  function save() {
+    try { localStorage.setItem("oracle2048", JSON.stringify({ n: st.n, cells: st.cells, brush: st.brush, spawn: st.spawn, think: st.think, score: st.score, moves: st.moves })); } catch (e) {}
+  }
+  const key = () => st.n + ":" + st.cells.join(",");
+
+  // ---------- worker ----------
+  const src = $("engine-src").textContent;
+  const worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+  let busy = false, current = null, pending = null;
+  function request(job) {
+    return new Promise((res) => {
+      job.res = res;
+      if (busy) { if (pending) pending.res(null); pending = job; }
+      else run(job);
+    });
+  }
+  function run(job) { busy = true; current = job; worker.postMessage({ cells: job.cells, n: job.n, budget: job.budget, key: job.key }); }
+  worker.onmessage = (e) => {
+    if (e.data.status === "tables") { $("bestsub").textContent = "Preparing " + e.data.n + "×" + e.data.n + " tables…"; return; }
+    busy = false;
+    const job = current; current = null;
+    job.res(e.data);
+    if (pending) { const p = pending; pending = null; run(p); }
+  };
+  function analyzeNow() {
+    $("bestsub").textContent = "Thinking…";
+    return request({ cells: st.cells.slice(), n: st.n, budget: st.think, key: key() }).then((r) => {
+      if (!r || r.key !== key()) return null;
+      lastResult = r;
+      renderVerdict(r);
+      return r;
+    });
+  }
+
+  // ---------- game logic (UI side) ----------
+  function slide(cells, n, dir) {
+    const out = new Array(n * n).fill(0);
+    let pts = 0;
+    for (let line = 0; line < n; line++) {
+      const idx = [];
+      for (let i = 0; i < n; i++) {
+        if (dir === 2) idx.push(line * n + i);
+        else if (dir === 3) idx.push(line * n + (n - 1 - i));
+        else if (dir === 0) idx.push(i * n + line);
+        else idx.push((n - 1 - i) * n + line);
+      }
+      const vals = idx.map((k) => cells[k]).filter((v) => v);
+      const res = [];
+      for (let i = 0; i < vals.length; i++) {
+        if (i + 1 < vals.length && vals[i] === vals[i + 1] && vals[i] < 15) { res.push(vals[i] + 1); pts += 1 << (vals[i] + 1); i++; }
+        else res.push(vals[i]);
+      }
+      res.forEach((v, i) => { out[idx[i]] = v; });
+    }
+    const moved = out.some((v, i) => v !== cells[i]);
+    return { cells: out, pts, moved };
+  }
+  function randomSpawn() {
+    const empties = st.cells.map((v, i) => (v ? -1 : i)).filter((i) => i >= 0);
+    if (!empties.length) return -1;
+    const i = empties[Math.floor(Math.random() * empties.length)];
+    st.cells[i] = Math.random() < 0.9 ? 1 : 2;
+    return i;
+  }
+  function pushHistory() {
+    history.push({ cells: st.cells.slice(), score: st.score, moves: st.moves, awaitingSpawn });
+    if (history.length > 300) history.shift();
+  }
+  function doMove(dir) {
+    if (awaitingSpawn) { flashHint(); return false; }
+    const r = slide(st.cells, st.n, dir);
+    if (!r.moved) return false;
+    pushHistory();
+    st.cells = r.cells; st.score += r.pts; st.moves++;
+    let popped = -1;
+    if (st.spawn === "random") popped = randomSpawn();
+    else { awaitingSpawn = true; setBrush(1); }
+    changed(popped);
+    return true;
+  }
+
+  // ---------- rendering ----------
+  const boardEl = $("board");
+  let cellEls = [];
+  function buildBoard() {
+    boardEl.innerHTML = "";
+    boardEl.style.gridTemplateColumns = `repeat(${st.n}, minmax(0, 1fr))`;
+    boardEl.style.gridTemplateRows = `repeat(${st.n}, minmax(0, 1fr))`;
+    cellEls = [];
+    for (let i = 0; i < st.n * st.n; i++) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "cell"; b.dataset.i = i;
+      boardEl.appendChild(b); cellEls.push(b);
+    }
+  }
+  function tileStyle(el, v) {
+    if (!v) { el.style.background = ""; el.style.color = ""; return; }
+    el.style.background = `var(--t${v})`;
+    el.style.color = (v >= 5 && v <= 6) || v >= 10 ? "var(--tile-light)" : "var(--tile-dark)";
+  }
+  function renderBoard(popIdx) {
+    const n = st.n;
+    st.cells.forEach((v, i) => {
+      const el = cellEls[i];
+      const label = v ? String(1 << v) : "";
+      el.textContent = label;
+      tileStyle(el, v);
+      const digits = label.length || 1;
+      const base = n === 4 ? 10.5 : 8.4;
+      const scale = [1, 1, 1, 0.82, 0.66, 0.54][digits] || 0.5;
+      el.style.fontSize = `${base * scale}cqw`;
+      el.setAttribute("aria-label", `Row ${Math.floor(i / n) + 1}, column ${(i % n) + 1}: ${label || "empty"}`);
+      if (i === popIdx) { el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
+    });
+    $("hint").hidden = !awaitingSpawn;
+    $("score").textContent = st.score.toLocaleString();
+    $("moveCount").textContent = st.moves.toLocaleString();
+    const m = Math.max(...st.cells);
+    $("maxTile").textContent = m ? (1 << m).toLocaleString() : "–";
+    $("boardnote").textContent = key() === "4:" + SAMPLE4.join(",") ? "Example position. Paint your own board." : "";
+    $("undo").disabled = history.length === 0;
+  }
+  const palette = $("palette");
+  function buildPalette() {
+    palette.innerHTML = "";
+    const erase = document.createElement("button");
+    erase.type = "button"; erase.className = "chip erase"; erase.textContent = "Erase"; erase.dataset.v = 0;
+    palette.appendChild(erase);
+    for (let v = 1; v <= 15; v++) {
+      const c = document.createElement("button");
+      c.type = "button"; c.className = "chip"; c.dataset.v = v;
+      c.textContent = v >= 14 ? (1 << v) / 1024 + "k" : String(1 << v);
+      c.setAttribute("aria-label", "Paint " + (1 << v));
+      tileStyle(c, v);
+      palette.appendChild(c);
+    }
+    syncPalette();
+  }
+  function syncPalette() { palette.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(+c.dataset.v === st.brush))); }
+  function setBrush(v) { st.brush = v; syncPalette(); }
+
+  const movesEl = $("moves");
+  function renderVerdict(r) {
+    const arrow = $("arrow");
+    if (r.best < 0) {
+      arrow.className = "arrow none";
+      $("bestname").textContent = "No moves";
+      $("bestsub").textContent = "Game over. Nothing can slide.";
+    } else {
+      arrow.className = "arrow";
+      arrow.style.transform = `rotate(${ARROW_ROT[r.best]}deg)`;
+      $("bestname").textContent = DIRS[r.best];
+      $("bestsub").textContent = `${r.depth} move${r.depth > 1 ? "s" : ""} deep · ${r.evals.toLocaleString()} positions · ${(r.ms / 1000).toFixed(2)} s`;
+    }
+    const legal = r.scores.filter((s, d) => r.valid[d]);
+    const top = Math.max(...legal), low = Math.min(...legal);
+    movesEl.innerHTML = "";
+    DIRS.forEach((name, d) => {
+      const row = document.createElement("div");
+      row.className = "mv" + (d === r.best ? " best" : "") + (r.valid[d] ? "" : " illegal");
+      let pct = 0, txt = "can't move";
+      if (r.valid[d]) {
+        pct = top === low ? 100 : 18 + 82 * (r.scores[d] - low) / (top - low);
+        const rel = top ? (r.scores[d] - top) / top * 100 : 0;
+        txt = d === r.best ? "best" : (Math.abs(rel) < 0.05 ? "≈ best" : rel.toFixed(1) + "%");
+      }
+      row.innerHTML = `<span class="name">${name}</span><span class="track"><span class="fill" style="width:${pct}%"></span></span><span class="val">${txt}</span>`;
+      if (r.valid[d]) row.title = "Expected score " + r.scores[d].toFixed(0);
+      movesEl.appendChild(row);
+    });
+  }
+  function renderPending() {
+    $("bestname").textContent = "…";
+  }
+
+  let tick = 0;
+  function changed(popIdx) {
+    renderBoard(popIdx);
+    save();
+    tick++;
+    if (awaitingSpawn) {
+      $("bestname").textContent = "Place tile";
+      $("bestsub").textContent = "Add the 2 or 4 that appeared, then I'll analyze";
+      $("arrow").className = "arrow none";
+      movesEl.innerHTML = "";
+      return;
+    }
+    if (!autoplay) analyzeNow();
+  }
+  function flashHint() {
+    const h = $("hint");
+    h.animate && h.animate([{ transform: "translate(-50%,100%) scale(1)" }, { transform: "translate(-50%,100%) scale(1.08)" }, { transform: "translate(-50%,100%) scale(1)" }], { duration: 240 });
+  }
+
+  // ---------- painting ----------
+  let painting = false, paintedThisStroke = new Set(), strokeSaved = false;
+  function paintAt(i, v) {
+    if (i == null || paintedThisStroke.has(i)) return;
+    paintedThisStroke.add(i);
+    if (st.cells[i] === v) return;
+    if (!strokeSaved) { pushHistory(); strokeSaved = true; }
+    st.cells[i] = v;
+    if (awaitingSpawn && v) { awaitingSpawn = false; }
+    changed(i);
+  }
+  const cellIndexAt = (x, y) => { const el = document.elementFromPoint(x, y); return el && el.classList.contains("cell") ? +el.dataset.i : null; };
+  boardEl.addEventListener("pointerdown", (e) => {
+    const i = cellIndexAt(e.clientX, e.clientY);
+    if (i == null) return;
+    e.preventDefault();
+    stopAutoplay();
+    painting = true; paintedThisStroke = new Set(); strokeSaved = false;
+    paintAt(i, e.button === 2 ? 0 : st.brush);
+    painting = e.button !== 2;
+  });
+  window.addEventListener("pointermove", (e) => { if (painting) paintAt(cellIndexAt(e.clientX, e.clientY), st.brush); });
+  window.addEventListener("pointerup", () => { painting = false; });
+  boardEl.addEventListener("contextmenu", (e) => e.preventDefault());
+  boardEl.addEventListener("keydown", (e) => {
+    // keyboard editing of a focused cell: Enter/Space paints, Backspace clears
+    const i = e.target.dataset && e.target.dataset.i;
+    if (i == null) return;
+    if (e.key === " ") { e.preventDefault(); paintedThisStroke = new Set(); strokeSaved = false; paintAt(+i, st.brush); }
+    if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); paintedThisStroke = new Set(); strokeSaved = false; paintAt(+i, 0); }
+  });
+  palette.addEventListener("click", (e) => { const c = e.target.closest(".chip"); if (c) setBrush(+c.dataset.v); save(); });
+
+  // ---------- controls ----------
+  function setSize(n) {
+    if (n === st.n) return;
+    stopAutoplay();
+    st.n = n; st.cells = new Array(n * n).fill(0); st.score = 0; st.moves = 0; history = []; awaitingSpawn = false;
+    randomSpawn(); randomSpawn();
+    syncSegs(); buildBoard(); changed(-1);
+  }
+  function syncSegs() {
+    document.querySelectorAll("[data-size]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.size === st.n)));
+    document.querySelectorAll("[data-spawn]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.spawn === st.spawn)));
+    document.querySelectorAll("[data-think]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.think === st.think)));
+  }
+  document.querySelectorAll("[data-size]").forEach((b) => b.addEventListener("click", () => setSize(+b.dataset.size)));
+  document.querySelectorAll("[data-spawn]").forEach((b) => b.addEventListener("click", () => {
+    st.spawn = b.dataset.spawn; syncSegs(); save();
+    if (st.spawn === "random" && awaitingSpawn) { awaitingSpawn = false; const p = randomSpawn(); changed(p); }
+  }));
+  document.querySelectorAll("[data-think]").forEach((b) => b.addEventListener("click", () => { st.think = +b.dataset.think; syncSegs(); save(); if (!awaitingSpawn) analyzeNow(); }));
+
+  function playBest() {
+    if (awaitingSpawn) { flashHint(); return; }
+    if (lastResult && lastResult.key === key() && lastResult.best >= 0) doMove(lastResult.best);
+    else analyzeNow().then((r) => { if (r && r.best >= 0) doMove(r.best); });
+  }
+  $("playBest").addEventListener("click", playBest);
+  function undo() {
+    stopAutoplay();
+    const h = history.pop();
+    if (!h) return;
+    st.cells = h.cells; st.score = h.score; st.moves = h.moves; awaitingSpawn = h.awaitingSpawn;
+    changed(-1);
+  }
+  $("undo").addEventListener("click", undo);
+  $("newGame").addEventListener("click", () => {
+    stopAutoplay(); pushHistory();
+    st.cells = new Array(st.n * st.n).fill(0); st.score = 0; st.moves = 0; awaitingSpawn = false;
+    randomSpawn(); randomSpawn(); changed(-1);
+  });
+  $("clear").addEventListener("click", () => {
+    stopAutoplay(); pushHistory();
+    st.cells = new Array(st.n * st.n).fill(0); st.score = 0; st.moves = 0; awaitingSpawn = false; changed(-1);
+  });
+
+  // autoplay: solver plays with random tiles
+  async function autoLoop() {
+    while (autoplay) {
+      if (awaitingSpawn) { awaitingSpawn = false; randomSpawn(); renderBoard(-1); }
+      const r = await analyzeNow();
+      if (!autoplay) break;
+      if (!r) continue;
+      if (r.best < 0) { stopAutoplay(); break; }
+      const res = slide(st.cells, st.n, r.best);
+      pushHistory();
+      st.cells = res.cells; st.score += res.pts; st.moves++;
+      const p = randomSpawn();
+      renderBoard(p); save();
+      await new Promise((ok) => setTimeout(ok, 30));
+    }
+  }
+  function stopAutoplay() {
+    if (!autoplay) return;
+    autoplay = false;
+    $("autoplay").classList.remove("on"); $("autoplay").textContent = "Autoplay";
+    if (!awaitingSpawn) analyzeNow();
+  }
+  $("autoplay").addEventListener("click", () => {
+    if (autoplay) { stopAutoplay(); return; }
+    autoplay = true;
+    $("autoplay").classList.add("on"); $("autoplay").textContent = "Stop autoplay";
+    autoLoop();
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "TEXTAREA") return;
+    const map = { ArrowUp: 0, ArrowDown: 1, ArrowLeft: 2, ArrowRight: 3 };
+    if (e.key in map) { e.preventDefault(); stopAutoplay(); doMove(map[e.key]); }
+    else if (e.key === "Enter" && !(e.target.tagName === "BUTTON")) { e.preventDefault(); playBest(); }
+    else if (e.key === "z" || e.key === "Z") { undo(); }
+  });
+
+  // paste / copy
+  $("loadPaste").addEventListener("click", () => {
+    const err = $("pasteErr"); err.hidden = true;
+    const toks = $("pasteBox").value.match(/\d+|[._-]/g) || [];
+    const n = toks.length === 16 ? 4 : toks.length === 25 ? 5 : 0;
+    if (!n) { err.textContent = `Found ${toks.length} tiles. A 4×4 board needs 16 and a 5×5 board needs 25.`; err.hidden = false; return; }
+    const cells = [];
+    for (const t of toks) {
+      const v = /\d/.test(t) ? +t : 0;
+      if (v === 0) { cells.push(0); continue; }
+      const e = Math.log2(v);
+      if (!Number.isInteger(e) || e < 1 || e > 15) { err.textContent = `${t} isn't a 2048 tile. Use powers of two from 2 to 32768.`; err.hidden = false; return; }
+      cells.push(e);
+    }
+    stopAutoplay(); pushHistory();
+    if (n !== st.n) { st.n = n; history = []; buildBoard(); syncSegs(); }
+    st.cells = cells; awaitingSpawn = false; changed(-1);
+  });
+  $("copyBoard").addEventListener("click", () => {
+    const n = st.n, lines = [];
+    for (let r = 0; r < n; r++) lines.push(st.cells.slice(r * n, r * n + n).map((v) => (v ? 1 << v : 0)).join(" "));
+    const text = lines.join("\n");
+    $("pasteBox").value = text;
+    const btn = $("copyBoard");
+    const done = (msg) => { btn.textContent = msg; setTimeout(() => (btn.textContent = "Copy current board"), 1400); };
+    try {
+      navigator.clipboard.writeText(text).then(() => done("Copied"), () => { $("pasteBox").select(); done("Selected, press Ctrl+C"); });
+    } catch (e) { $("pasteBox").select(); done("Selected, press Ctrl+C"); }
+  });
+
+  // ---------- boot ----------
+  buildPalette(); buildBoard(); syncSegs(); renderPending(); changed(-1);
+})();
+</script>
